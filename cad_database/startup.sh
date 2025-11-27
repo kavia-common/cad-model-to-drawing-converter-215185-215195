@@ -133,13 +133,34 @@ EOF
 echo "psql postgresql://${DB_USER}:${DB_PASSWORD}@localhost:${DB_PORT}/${DB_NAME}" > db_connection.txt
 echo "Connection string saved to db_connection.txt"
 
-# Save environment variables to a file
+# Apply application schema if present (idempotent)
+if [ -f "schema.sql" ]; then
+  echo "Applying database schema from schema.sql..."
+  # Use application user to apply schema so ownership is correct
+  PGPASSWORD="${DB_PASSWORD}" ${PG_BIN}/psql \
+    -h localhost -p ${DB_PORT} -U ${DB_USER} -d ${DB_NAME} -v ON_ERROR_STOP=1 \
+    -f schema.sql || {
+      echo "⚠ Failed to apply schema.sql with app user, retrying as postgres..."
+      sudo -u postgres ${PG_BIN}/psql \
+        -p ${DB_PORT} -d ${DB_NAME} -v ON_ERROR_STOP=1 -f schema.sql
+    }
+  echo "✓ Schema applied (safe to run multiple times)"
+else
+  echo "No schema.sql found, skipping schema application."
+fi
+
+# Save environment variables to a file (for db visualizer and as reference)
 cat > db_visualizer/postgres.env << EOF
 export POSTGRES_URL="postgresql://localhost:${DB_PORT}/${DB_NAME}"
 export POSTGRES_USER="${DB_USER}"
 export POSTGRES_PASSWORD="${DB_PASSWORD}"
 export POSTGRES_DB="${DB_NAME}"
 export POSTGRES_PORT="${DB_PORT}"
+EOF
+
+# Provide DATABASE_URL convenience file for backend services
+cat > DATABASE_URL.txt << EOF
+postgresql://${DB_USER}:${DB_PASSWORD}@localhost:${DB_PORT}/${DB_NAME}
 EOF
 
 echo "PostgreSQL setup complete!"
@@ -149,6 +170,7 @@ echo "Port: ${DB_PORT}"
 echo ""
 
 echo "Environment variables saved to db_visualizer/postgres.env"
+echo "DATABASE_URL written to DATABASE_URL.txt"
 echo "To use with Node.js viewer, run: source db_visualizer/postgres.env"
 
 echo "To connect to the database, use one of the following commands:"
